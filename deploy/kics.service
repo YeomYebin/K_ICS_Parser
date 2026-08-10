@@ -1,0 +1,19 @@
+[Unit]
+Description=K-ICS 경영공시 PDF 파서 (gunicorn)
+After=network.target
+
+[Service]
+# Amazon Linux 2023 는 ec2-user, Ubuntu 는 ubuntu 로 바꾸세요.
+User=ec2-user
+WorkingDirectory=/home/ec2-user/K_ICS_Parser
+# .env 에는 AWS_REGION, BEDROCK_MODEL_ID 만 두세요.
+# (IAM 인스턴스 역할을 쓰면 AWS_BEARER_TOKEN_BEDROCK 는 넣지 않습니다)
+EnvironmentFile=/home/ec2-user/K_ICS_Parser/.env
+ExecStart=/home/ec2-user/K_ICS_Parser/.venv/bin/gunicorn \
+    --workers 2 --threads 4 --worker-class gthread \
+    --timeout 600 --bind 127.0.0.1:8000 app:app
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
