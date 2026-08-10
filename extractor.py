@@ -136,7 +136,13 @@ def normalize_units(data):
 
 
 def add_ratio_check(data, tolerance=1.0):
-    """K-ICS 비율 검산: 가용자본 / 요구자본 * 100 과 추출값 비교."""
+    """K-ICS 비율: 표시값은 '가용자본 / 요구자본 * 100' 계산값을 기본으로 사용.
+
+    - kics_ratio         : 문서에서 추출한 값 (참고/검산용)
+    - kics_ratio_calc    : 가용자본 / 요구자본 * 100 (계산값)
+    - kics_ratio_display : 화면/엑셀에 표시할 값 = 계산값(없으면 문서값으로 폴백)
+    - ratio_warning      : 계산값과 문서값이 허용오차 밖으로 다르면 True (빨간색 표시용)
+    """
     a = data.get("available_capital")
     r = data.get("required_capital")
     ratio = data.get("kics_ratio")
@@ -145,6 +151,9 @@ def add_ratio_check(data, tolerance=1.0):
     if isinstance(a, (int, float)) and isinstance(r, (int, float)) and r:
         calc = round(a / r * 100, 1)
     data["kics_ratio_calc"] = calc
+
+    # 표시값: 계산값 우선, 계산 불가 시 문서 추출값으로 폴백
+    data["kics_ratio_display"] = calc if calc is not None else ratio
 
     warning = False
     if calc is not None and isinstance(ratio, (int, float)):

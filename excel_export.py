@@ -28,9 +28,12 @@ def build_excel(rows, quarter_label="'26.03월"):
         cell.border = BORDER
 
     for r in rows:
+        ratio_shown = r.get("kics_ratio_display")
+        if ratio_shown is None:
+            ratio_shown = r.get("kics_ratio")
         ws.append([
             r.get("display_name") or r.get("company"),
-            r.get("kics_ratio"),
+            ratio_shown,  # 표시값 = 가용÷요구 계산값 (없으면 문서값)
             r.get("available_capital"),
             r.get("required_capital"),
             r.get("tier1_capital"),
@@ -54,16 +57,16 @@ def build_excel(rows, quarter_label="'26.03월"):
                 cell.alignment = Alignment(horizontal="right", vertical="center")
             else:
                 cell.alignment = LEFT_WRAP
-        # 검산 경고 시 K-ICS 비율 셀 강조
+        # 계산값(표시값)이 문서 표기값과 다르면 K-ICS 비율 셀을 빨간색으로 강조
         if rec.get("ratio_warning"):
             wc = ws.cell(row=row_idx, column=2)
             wc.fill = WARN_FILL
+            wc.font = Font(bold=True, color="C00000")  # 빨간색 글씨
             calc = rec.get("kics_ratio_calc")
-            wc.comment = None
-            ws.cell(row=row_idx, column=2).value = rec.get("kics_ratio")
-            if calc is not None:
-                from openpyxl.comments import Comment
-                wc.comment = Comment(f"검산값(가용/요구*100) = {calc}", "검산")
+            doc = rec.get("kics_ratio")
+            from openpyxl.comments import Comment
+            wc.comment = Comment(
+                f"계산값(가용/요구*100) = {calc}\n문서 표기값 = {doc}", "검산")
 
     widths = [12, 11, 12, 12, 12, 12, 60]
     for i, w in enumerate(widths, start=1):

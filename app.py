@@ -24,6 +24,22 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/pageinfo", methods=["POST"])
+def pageinfo():
+    """PDF 페이지 수만 빠르게 반환 (LLM 호출 없음, 목록 정렬용)."""
+    import pymupdf
+    file = request.files.get("file")
+    if file is None or file.filename == "":
+        return jsonify({"error": "파일이 없습니다."}), 400
+    try:
+        doc = pymupdf.open(stream=file.read(), filetype="pdf")
+        pages = doc.page_count
+        doc.close()
+        return jsonify({"pages": pages})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route("/extract", methods=["POST"])
 def extract():
     """PDF 1개를 받아 추출 결과 한 행(JSON)을 반환."""

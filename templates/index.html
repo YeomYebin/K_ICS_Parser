@@ -15,18 +15,40 @@
     main { max-width:1200px; margin:24px auto; padding:0 20px; }
 
     #drop { border:2px dashed var(--accent); border-radius:12px; background:#fff;
-            padding:32px; text-align:center; cursor:pointer; transition:.15s; }
+            padding:28px; text-align:center; cursor:pointer; transition:.15s; }
     #drop.drag { background:#eef3fb; border-color:var(--head); }
     #drop p { margin:6px 0; color:#555; }
     #drop strong { color:var(--accent); }
 
-    .toolbar { display:flex; gap:12px; align-items:center; margin:18px 0 10px; flex-wrap:wrap; }
+    .section-title { font-size:14px; font-weight:700; color:var(--head); margin:22px 0 8px; }
+    .toolbar { display:flex; gap:10px; align-items:center; margin:10px 0; flex-wrap:wrap; }
     button { font-size:14px; border:none; border-radius:8px; padding:9px 16px; cursor:pointer; }
     button.primary { background:var(--accent); color:#fff; }
     button.primary:disabled { background:#9db2d6; cursor:not-allowed; }
     button.ghost { background:#fff; border:1px solid var(--line); }
+    button.sort { background:#fff; border:1px solid var(--line); padding:6px 12px; font-size:13px; }
+    button.sort.active { background:#e7edf7; border-color:var(--accent); color:var(--head); font-weight:700; }
     #status { font-size:13px; color:#555; }
 
+    /* 대기 목록 */
+    #queue { list-style:none; margin:0; padding:0; background:#fff; border:1px solid var(--line);
+             border-radius:10px; overflow:hidden; }
+    #queue:empty { display:none; }
+    #queue li { display:flex; align-items:center; gap:10px; padding:9px 12px;
+                border-top:1px solid #eef0f3; font-size:14px; background:#fff; }
+    #queue li:first-child { border-top:none; }
+    #queue li.dragging { opacity:.4; }
+    #queue li.over { border-top:2px solid var(--accent); }
+    .q-handle { cursor:grab; color:#aaa; font-size:16px; user-select:none; }
+    .q-idx { width:22px; color:#999; text-align:right; font-variant-numeric:tabular-nums; }
+    .q-name { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .q-size, .q-pages { color:#666; font-size:13px; font-variant-numeric:tabular-nums;
+                        white-space:nowrap; }
+    .q-pages { min-width:64px; text-align:right; }
+    .q-del { color:#c0392b; cursor:pointer; border:none; background:none; font-size:16px; padding:0 4px; }
+    .queue-empty { color:#999; font-size:13px; padding:6px 2px; }
+
+    /* 결과 표 */
     table { width:100%; border-collapse:collapse; background:#fff; margin-top:8px;
             box-shadow:0 1px 3px rgba(0,0,0,.08); }
     th, td { border:1px solid var(--line); padding:9px 10px; font-size:14px; }
@@ -53,22 +75,38 @@
 <body>
   <header>
     <h1>K-ICS 경영공시 PDF 파서</h1>
-    <p>보험사 정기 경영공시 PDF(회사별 1파일)를 올리면 지급여력 수치를 추출합니다. · 단위: 억원</p>
+    <p>PDF를 목록에 담고 순서를 정한 뒤 [추출 시작]을 누르면 그 순서대로 처리합니다. · 단위: 억원</p>
   </header>
 
   <main>
     <div id="drop">
-      <p>📄 <strong>PDF 파일을 여기로 끌어놓거나 클릭</strong>하여 선택하세요 (여러 개 가능)</p>
-      <p class="hint">회사당 1개 파일 · 파일당 1회 LLM(Bedrock Opus) 호출</p>
+      <p>📄 <strong>PDF 파일을 여기로 끌어놓거나 클릭</strong>하여 목록에 추가하세요 (여러 개 가능)</p>
+      <p class="hint">추가만 되고 바로 실행되지 않습니다. 순서를 조정한 뒤 아래 [추출 시작]을 누르세요.</p>
       <input id="fileInput" type="file" accept="application/pdf" multiple hidden>
     </div>
 
+    <div class="section-title">대기 목록 <span id="queueCount" style="color:#888;font-weight:400"></span></div>
     <div class="toolbar">
-      <button id="downloadBtn" class="primary" disabled>⬇ 엑셀 다운로드</button>
-      <button id="clearBtn" class="ghost">초기화</button>
+      <span style="font-size:13px;color:#666">정렬:</span>
+      <button class="sort" data-key="name">파일명</button>
+      <button class="sort" data-key="size">크기</button>
+      <button class="sort" data-key="pages">페이지수</button>
+      <span class="hint" style="margin:0">· 행을 끌어서 순서를 직접 바꿀 수도 있습니다</span>
+    </div>
+    <ul id="queue"></ul>
+    <div class="queue-empty" id="queueEmpty">아직 추가된 파일이 없습니다.</div>
+
+    <div class="toolbar">
+      <button id="startBtn" class="primary" disabled>▶ 추출 시작</button>
+      <button id="clearQueueBtn" class="ghost">목록 비우기</button>
       <span id="status"></span>
     </div>
 
+    <div class="section-title">결과</div>
+    <div class="toolbar">
+      <button id="downloadBtn" class="primary" disabled>⬇ 엑셀 다운로드</button>
+      <button id="clearResultBtn" class="ghost">결과 초기화</button>
+    </div>
     <table id="resultTable">
       <thead>
         <tr>
@@ -82,64 +120,168 @@
       </thead>
       <tbody id="tbody"></tbody>
     </table>
-    <p class="hint">* 회사명(행)을 클릭하면 '주요 변동요인'이 펼쳐집니다. K-ICS 비율 셀이 붉으면 검산(가용÷요구×100) 불일치입니다.</p>
+    <p class="hint">* 회사명(행)을 클릭하면 '주요 변동요인'이 펼쳐집니다. K-ICS 비율은 가용÷요구×100 계산값이며, 문서 표기값과 다르면 붉게 표시됩니다.</p>
   </main>
 
   <script>
     const drop = document.getElementById('drop');
     const fileInput = document.getElementById('fileInput');
+    const queueEl = document.getElementById('queue');
+    const queueEmpty = document.getElementById('queueEmpty');
+    const queueCount = document.getElementById('queueCount');
     const tbody = document.getElementById('tbody');
     const statusEl = document.getElementById('status');
+    const startBtn = document.getElementById('startBtn');
+    const clearQueueBtn = document.getElementById('clearQueueBtn');
     const downloadBtn = document.getElementById('downloadBtn');
-    const clearBtn = document.getElementById('clearBtn');
+    const clearResultBtn = document.getElementById('clearResultBtn');
     const qHeader = document.getElementById('qHeader');
 
-    let rows = [];  // 추출 성공 행 보관
+    let queue = [];       // {id, file, name, size, pages(null|number)}
+    let rows = [];        // 추출 성공 결과
+    let running = false;
+    let sortKey = null, sortDir = 1;
+    let uid = 0;
 
     const fmt = n => (n === null || n === undefined || n === '') ? '-'
                      : Number(n).toLocaleString('ko-KR');
     const fmtRatio = n => (n === null || n === undefined || n === '') ? '-'
                      : Number(n).toFixed(1);
+    const fmtSize = b => b >= 1048576 ? (b/1048576).toFixed(1)+' MB' : Math.round(b/1024)+' KB';
 
+    // ---------- 파일 추가 ----------
     drop.addEventListener('click', () => fileInput.click());
     drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
     drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
     drop.addEventListener('drop', e => {
       e.preventDefault(); drop.classList.remove('drag');
-      handleFiles(e.dataTransfer.files);
+      addToQueue(e.dataTransfer.files);
     });
-    fileInput.addEventListener('change', () => handleFiles(fileInput.files));
-    clearBtn.addEventListener('click', () => {
-      rows = []; tbody.innerHTML = ''; statusEl.textContent = '';
-      downloadBtn.disabled = true; fileInput.value = '';
+    fileInput.addEventListener('change', () => { addToQueue(fileInput.files); fileInput.value = ''; });
+
+    function addToQueue(fileList) {
+      const pdfs = Array.from(fileList).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+      for (const file of pdfs) {
+        const item = { id: 'q'+(uid++), file, name: file.name, size: file.size, pages: null };
+        queue.push(item);
+        fetchPages(item);   // 페이지 수 비동기 조회
+      }
+      renderQueue();
+    }
+
+    async function fetchPages(item) {
+      try {
+        const fd = new FormData(); fd.append('file', item.file);
+        const res = await fetch('/pageinfo', { method:'POST', body: fd });
+        const d = await res.json();
+        item.pages = res.ok ? d.pages : '?';
+      } catch { item.pages = '?'; }
+      renderQueue();
+    }
+
+    // ---------- 정렬 ----------
+    document.querySelectorAll('button.sort').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.key;
+        if (sortKey === key) sortDir = -sortDir; else { sortKey = key; sortDir = 1; }
+        queue.sort((a, b) => {
+          let va = a[key], vb = b[key];
+          if (key === 'name') return va.localeCompare(vb, 'ko') * sortDir;
+          va = (va === null || va === '?') ? -1 : va;
+          vb = (vb === null || vb === '?') ? -1 : vb;
+          return (va - vb) * sortDir;
+        });
+        renderQueue();
+      });
+    });
+
+    // ---------- 목록 렌더 + 드래그 재정렬 ----------
+    function renderQueue() {
+      queueEl.innerHTML = '';
+      queue.forEach((item, i) => {
+        const li = document.createElement('li');
+        li.draggable = !running;
+        li.dataset.id = item.id;
+        const pages = item.pages == null ? '<span class="spin"></span>'
+                    : (item.pages === '?' ? '?쪽' : item.pages + '쪽');
+        li.innerHTML =
+          `<span class="q-handle" title="끌어서 순서 변경">☰</span>
+           <span class="q-idx">${i+1}</span>
+           <span class="q-name">${escapeHtml(item.name)}</span>
+           <span class="q-size">${fmtSize(item.size)}</span>
+           <span class="q-pages">${pages}</span>
+           <button class="q-del" title="목록에서 제거">✕</button>`;
+        li.querySelector('.q-del').addEventListener('click', () => {
+          if (running) return;
+          queue = queue.filter(q => q.id !== item.id); renderQueue();
+        });
+        if (!running) addDragHandlers(li);
+        queueEl.appendChild(li);
+      });
+      queueEmpty.style.display = queue.length ? 'none' : 'block';
+      queueCount.textContent = queue.length ? `(${queue.length}개)` : '';
+      document.querySelectorAll('button.sort').forEach(b =>
+        b.classList.toggle('active', b.dataset.key === sortKey));
+      const active = document.querySelector('button.sort.active');
+      if (active) active.textContent = active.dataset.key === 'name' ? '파일명' :
+        active.dataset.key === 'size' ? '크기' : '페이지수';
+      document.querySelectorAll('button.sort.active').forEach(b =>
+        b.textContent += sortDir > 0 ? ' ▲' : ' ▼');
+      startBtn.disabled = running || queue.length === 0;
+    }
+
+    let dragId = null;
+    function addDragHandlers(li) {
+      li.addEventListener('dragstart', () => { dragId = li.dataset.id; li.classList.add('dragging'); });
+      li.addEventListener('dragend', () => { dragId = null; li.classList.remove('dragging');
+        document.querySelectorAll('#queue li').forEach(x => x.classList.remove('over')); });
+      li.addEventListener('dragover', e => { e.preventDefault(); li.classList.add('over'); });
+      li.addEventListener('dragleave', () => li.classList.remove('over'));
+      li.addEventListener('drop', e => {
+        e.preventDefault();
+        const from = queue.findIndex(q => q.id === dragId);
+        const to = queue.findIndex(q => q.id === li.dataset.id);
+        if (from < 0 || to < 0 || from === to) return;
+        const [moved] = queue.splice(from, 1);
+        queue.splice(to, 0, moved);
+        renderQueue();
+      });
+    }
+
+    // ---------- 실행 ----------
+    startBtn.addEventListener('click', startProcessing);
+    clearQueueBtn.addEventListener('click', () => { if (!running) { queue = []; renderQueue(); } });
+    clearResultBtn.addEventListener('click', () => {
+      rows = []; tbody.innerHTML = ''; downloadBtn.disabled = true; statusEl.textContent = '';
     });
     downloadBtn.addEventListener('click', downloadExcel);
 
-    async function handleFiles(fileList) {
-      const files = Array.from(fileList).filter(f => f.name.toLowerCase().endsWith('.pdf'));
-      if (!files.length) return;
-      let done = 0;
-      for (const file of files) {
-        statusEl.innerHTML = `<span class="spin"></span>처리 중 (${done+1}/${files.length}): ${file.name}`;
-        const rowId = addPendingRow(file.name);
+    async function startProcessing() {
+      if (running || !queue.length) return;
+      running = true; renderQueue();
+      startBtn.disabled = true; clearQueueBtn.disabled = true;
+      let ok = 0;
+      for (let i = 0; i < queue.length; i++) {
+        const item = queue[i];
+        statusEl.innerHTML = `<span class="spin"></span>처리 중 (${i+1}/${queue.length}): ${item.name}`;
+        const rowId = addPendingRow(item.name);
         try {
-          const fd = new FormData();
-          fd.append('file', file);
+          const fd = new FormData(); fd.append('file', item.file);
           const res = await fetch('/extract', { method:'POST', body: fd });
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || '추출 실패');
-          fillRow(rowId, data);
-          rows.push(data);
+          fillRow(rowId, data); rows.push(data); ok++;
           if (data.quarter) qHeader.textContent = data.quarter;
         } catch (err) {
-          fillError(rowId, file.name, err.message);
+          fillError(rowId, item.name, err.message);
         }
-        done++;
       }
-      statusEl.textContent = `완료: ${rows.length}개 성공 / ${files.length}개 중`;
+      statusEl.textContent = `완료: ${ok}개 성공 / ${queue.length}개 중`;
       downloadBtn.disabled = rows.length === 0;
+      running = false; clearQueueBtn.disabled = false; renderQueue();
     }
 
+    // ---------- 결과 표 ----------
     let rowSeq = 0;
     function addPendingRow(fileName) {
       const id = 'r' + (rowSeq++);
@@ -154,11 +296,12 @@
     function fillRow(id, d) {
       const tr = document.getElementById(id);
       const warn = d.ratio_warning;
-      const warnTip = warn && d.kics_ratio_calc != null
-        ? ` title="검산값(가용÷요구×100) = ${d.kics_ratio_calc}, 추출값 = ${fmtRatio(d.kics_ratio)}"` : '';
+      const shown = (d.kics_ratio_display != null) ? d.kics_ratio_display : d.kics_ratio;
+      const warnTip = warn
+        ? ` title="계산값(가용÷요구×100) = ${fmtRatio(d.kics_ratio_calc)}, 문서 표기값 = ${fmtRatio(d.kics_ratio)}"` : '';
       tr.innerHTML =
         `<td class="name"><span class="caret">▸</span>${escapeHtml(d.display_name || d.company || '')}</td>
-         <td class="ratio ${warn ? 'warn' : ''}"${warnTip}>${fmtRatio(d.kics_ratio)}${warn ? ' <span class="warnicon">⚠</span>' : ''}</td>
+         <td class="ratio ${warn ? 'warn' : ''}"${warnTip}>${fmtRatio(shown)}${warn ? ' <span class="warnicon">⚠</span>' : ''}</td>
          <td class="num">${fmt(d.available_capital)}</td>
          <td class="num">${fmt(d.required_capital)}</td>
          <td class="num">${fmt(d.tier1_capital)}</td>
@@ -209,6 +352,8 @@
       return String(s).replace(/[&<>"']/g, c =>
         ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
+
+    renderQueue();
   </script>
 </body>
 </html>
