@@ -23,7 +23,8 @@ Flask 앱을 EC2에서 gunicorn + nginx 로 돌리고, **IAM 인스턴스 역할
 - **IAM 인스턴스 프로파일: 위에서 만든 `kics-ec2-bedrock` 역할 지정**
 - 보안 그룹:
   - SSH(22): 내 IP
-  - HTTP(80): 내 IP 또는 사내망 (공개하려면 0.0.0.0/0 — 단 아래 basic auth 필수)
+  - HTTP(80): **0.0.0.0/0** (누구나 크롬으로 접속) — 앱 비밀번호(`APP_PASSWORD`)로 보호
+  - HTTPS(443): 0.0.0.0/0 (아래 7번 HTTPS 설정 시)
 - (권장) **탄력적 IP(Elastic IP)** 할당해 고정 주소 부여
 
 ## 3. 서버 세팅 (SSH 접속 후)
@@ -43,16 +44,21 @@ python3.11 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-## 4. .env 작성 (키 없이 리전/모델만)
+## 4. .env 작성 (키 없이 리전/모델 + 접속 비밀번호)
 
 ```bash
-cat > ~/K_ICS_Parser/.env <<'EOF'
+# 아래 원하는비밀번호 자리에 실제 비밀번호를 넣으세요 (공개 문서에 실제 값을 적지 마세요)
+cat > ~/K_ICS_Parser/.env <<EOF
 AWS_REGION=us-east-1
 BEDROCK_MODEL_ID=us.anthropic.claude-opus-4-6-v1
+APP_PASSWORD=원하는비밀번호
+SECRET_KEY=$(python3.11 -c "import secrets;print(secrets.token_hex(32))")
 EOF
 ```
-> IAM 인스턴스 역할을 쓰므로 `AWS_BEARER_TOKEN_BEDROCK` 는 넣지 않습니다.
-> (boto3가 인스턴스 역할 자격증명을 자동으로 사용)
+> - IAM 인스턴스 역할을 쓰므로 `AWS_BEARER_TOKEN_BEDROCK` 는 넣지 않습니다 (boto3가 자동 사용).
+> - `APP_PASSWORD` → 접속 시 이 비밀번호를 입력해야 합니다 (아이디 없음).
+>   비밀번호를 바꾸려면 이 값만 수정 후 `sudo systemctl restart kics`.
+> - `SECRET_KEY` 는 위 명령이 랜덤으로 채워줍니다 (세션 서명용).
 
 동작 확인:
 ```bash
@@ -70,28 +76,28 @@ sudo systemctl enable --now kics
 sudo systemctl status kics        # active (running) 확인
 ```
 
-## 6. nginx + 비밀번호(basic auth)
+## 6. nginx 리버스 프록시 배치
+
+비밀번호 보호는 **앱 로그인 페이지**(4번의 `APP_PASSWORD`)가 처리하므로 nginx는 프록시만 합니다.
 
 ```bash
-# 비밀번호 파일 생성 (사용자명 admin)
-sudo dnf install -y httpd-tools
-sudo htpasswd -c /etc/nginx/.htpasswd admin   # 비밀번호 입력
-
-# 프록시 설정 배치
 sudo cp ~/K_ICS_Parser/deploy/nginx-kics.conf /etc/nginx/conf.d/kics.conf
 sudo nginx -t && sudo systemctl enable --now nginx
 sudo systemctl restart nginx
 ```
 
-이제 브라우저에서 `http://<EC2 퍼블릭 IP>/` 접속 → 아이디/비밀번호 입력 후 사용.
+이제 브라우저에서 `http://<EC2 퍼블릭 IP>/` 접속 → **4번에서 정한 비밀번호 입력** 후 사용.
 
-## 7. (선택) HTTPS
+## 7. HTTPS (공개 배포 시 강력 권장)
 
-도메인이 있으면:
+> 공개 URL + 비밀번호이므로 http면 비밀번호가 **평문 전송**됩니다. 도메인을 연결해 HTTPS를 켜세요.
+
+도메인이 있으면 (예: kics.example.com 을 EC2 IP로 A레코드 연결 후):
 ```bash
 sudo dnf install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d kics.example.com
+sudo certbot --nginx -d kics.example.com   # 인증서 자동 발급 + nginx https 설정
 ```
+도메인이 없으면 임시로 http로 접속은 되지만, 실사용 전 도메인+HTTPS 적용을 권장합니다.
 도메인 없이 IP만 쓰면 http로 접속 (내부용이면 충분).
 
 ---

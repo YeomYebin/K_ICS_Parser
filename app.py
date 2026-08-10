@@ -5,18 +5,53 @@
   2) .env.example 을 .env 로 복사하고 값(OOO)을 채움
   3) python app.py  →  http://127.0.0.1:5000
 """
+import os
+import secrets
 import traceback
 
 from dotenv import load_dotenv
-load_dotenv()  # .env 의 AWS_BEARER_TOKEN_BEDROCK / AWS_REGION / BEDROCK_MODEL_ID 로드
+load_dotenv()  # .env 의 AWS_REGION / BEDROCK_MODEL_ID / APP_PASSWORD / SECRET_KEY 로드
 
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import (Flask, render_template, request, jsonify, send_file,
+                   session, redirect)
 
 from extractor import extract_from_pdf
 from excel_export import build_excel
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 파일당 최대 100MB
+# 세션 키: .env 의 SECRET_KEY 사용(없으면 임시 생성 — 재시작 시 재로그인 필요)
+app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+
+# 접속 비밀번호 (.env 의 APP_PASSWORD). 비어 있으면 보호하지 않음.
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
+
+
+@app.before_request
+def require_login():
+    """APP_PASSWORD 가 설정돼 있으면 로그인 페이지를 통과해야만 접근 허용."""
+    if not APP_PASSWORD:
+        return  # 비밀번호 미설정 → 보호 안 함
+    if request.path == "/login" or session.get("authed"):
+        return
+    return redirect("/login")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        if request.form.get("password") == APP_PASSWORD:
+            session["authed"] = True
+            return redirect("/")
+        return render_template("login.html", error=True), 401
+    return render_template("login.html", error=False)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
 
 
 @app.route("/")
